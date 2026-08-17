@@ -148,6 +148,10 @@ namespace jammingdetector {
   void Setup();
   void Loop();
 }
+namespace freqscanner {
+  void Setup();
+  void Loop();
+}
 
 /* ───────────── WiFi namespaces ───────────── */
 namespace PacketMonitor {

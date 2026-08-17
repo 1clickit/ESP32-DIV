@@ -43,4 +43,9 @@ namespace jammingdetector {
   void Loop();
 }
 
+namespace freqscanner {
+  void Setup();
+  void Loop();
+}
+
 #endif

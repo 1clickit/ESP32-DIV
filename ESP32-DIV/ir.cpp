@@ -727,7 +727,7 @@ static void redrawCapturedDetailsOnly() {
 }
 
 static const char* kRandomNames[] = {
-  "TV", "AC", "Lamp", "Fan", "Receiver", "Projector", "Power", "Settings", "VolUp", "VolDn"
+  "TV", "AC", "Lamp", "Fan", "Receiver", "Projector", "Power", "Mute", "VolUp", "VolDn"
 };
 
 static uint32_t hashWaveform() {
@@ -2088,7 +2088,7 @@ static constexpr int kIconReloadX = 210;
 
 enum KeyId : uint8_t {
   Power = 0,
-  Settings,
+  Mute,
   VolUp,
   VolDn,
   ChUp,
@@ -2099,13 +2099,14 @@ enum KeyId : uint8_t {
   Right,
   Ok,
   Back,
+  Settings,
   KeyCount
 };
 
 static const char* keyLabel(KeyId k) {
   switch (k) {
     case Power: return "PWR";
-    case Settings:  return "Settings";
+    case Mute:  return "MUTE";
     case VolUp: return "VOL+";
     case VolDn: return "VOL-";
     case ChUp:  return "CH+";
@@ -2116,6 +2117,7 @@ static const char* keyLabel(KeyId k) {
     case Right: return "RIGHT";
     case Ok:    return "OK";
     case Back:  return "BACK";
+    case Settings: return "SET";
     default:    return "?";
   }
 }
@@ -2159,7 +2161,7 @@ static uint32_t s_browseVersion = 0;
 static const unsigned char* keyIcon(KeyId k) {
   switch (k) {
     case Power: return bitmap_icon_power;
-    case Settings:  return bitmap_icon_dialog;
+    case Mute:  return bitmap_icon_dialog;
     case VolUp: return bitmap_icon_sort_up_plus;
     case VolDn: return bitmap_icon_sort_down_minus;
     case ChUp:  return bitmap_icon_UP;
@@ -2170,6 +2172,7 @@ static const unsigned char* keyIcon(KeyId k) {
     case Right: return bitmap_icon_RIGHT;
     case Ok:    return bitmap_icon_start;
     case Back:  return bitmap_icon_go_back;
+    case Settings: return bitmap_icon_document_gear;
     default:    return nullptr;
   }
 }
@@ -2224,7 +2227,8 @@ static String normalizeToken(const String& in) {
 static bool keyFromToken(const String& tok, KeyId& out) {
   String k = normalizeToken(tok);
   if (k == "POWER" || k == "PWR") { out = Power; return true; }
-  if (k == "Settings") { out = Settings; return true; }
+  if (k == "MUTE") { out = Mute; return true; }
+  if (k == "SETTINGS" || k == "SET" || k == "MENU") { out = Settings; return true; }
   if (k == "VOLUP" || k == "VOLUMEUP" || k == "VOLPLUS" || k == "VUP" || k == "VOLP") { out = VolUp; return true; }
   if (k == "VOLDN" || k == "VOLDOWN" || k == "VOLUMEDOWN" || k == "VOLMINUS" || k == "VDN" || k == "VOLM") { out = VolDn; return true; }
   if (k == "CHUP" || k == "CHANUP" || k == "CHANNELUP" || k == "CHPLUS") { out = ChUp; return true; }
@@ -2349,7 +2353,8 @@ static void loadBuiltinProfiles() {
     p.proto = decode_type_t::SAMSUNG36;
     p.bits = 32;
     p.code[Power] = 0xE0E040BFu; p.has[Power] = true;
-    p.code[Settings]  = 0xE0E058A7u; p.has[Settings]  = true;
+    p.code[Mute]  = 0xE0E0F00Fu; p.has[Mute]  = true;
+    p.code[Settings] = 0xE0E058A7u; p.has[Settings] = true;  // menu
     p.code[VolUp] = 0xE0E0E01Fu; p.has[VolUp] = true;
     p.code[VolDn] = 0xE0E0D02Fu; p.has[VolDn] = true;
     p.code[ChUp]  = 0xE0E048B7u; p.has[ChUp]  = true;
@@ -2370,7 +2375,8 @@ static void loadBuiltinProfiles() {
     p.proto = decode_type_t::NEC;
     p.bits = 32;
     p.code[Power] = 0x20DF10EFu; p.has[Power] = true;
-    p.code[Settings]  = 0x20DFC23Du; p.has[Settings]  = true;
+    p.code[Mute]  = 0x20DF906Fu; p.has[Mute]  = true;
+    p.code[Settings] = 0x20DFC23Du; p.has[Settings] = true;  // menu/settings
     p.code[VolUp] = 0x20DF40BFu; p.has[VolUp] = true;
     p.code[VolDn] = 0x20DFC03Fu; p.has[VolDn] = true;
     p.code[ChUp]  = 0x20DF00FFu; p.has[ChUp]  = true;
@@ -2384,7 +2390,7 @@ static void loadBuiltinProfiles() {
     s_profiles.push_back(p);
   }
 
-  // Common Roku remotes (NEC address 0x5743). PWR sends Home; MUTE sends
+  // Common Roku remotes (NEC address 0x5743). PWR sends Home; SET sends
   // options/subtitle (*). Other Roku address families (e.g. 0x57E3) need SD profiles.
   {
     Profile p{};
@@ -2392,16 +2398,8 @@ static void loadBuiltinProfiles() {
     p.source = "built-in";
     p.proto = decode_type_t::NEC;
     p.bits = 32;
-    p.code[Power] = 0x5743C03F; p.has[Power] = true;
-    p.code[Settings]  = 0x57438679; p.has[Settings]  = true;
-    p.code[Up]    = 0x57439867; p.has[Up]    = true;
-    p.code[Down]  = 0x5743CC33; p.has[Down]  = true;
-    p.code[Left]  = 0x57437887; p.has[Left]  = true;
-    p.code[Right] = 0x5743B44B; p.has[Right] = true;
-    p.code[Ok]    = 0x574354AB; p.has[Ok]    = true; 
-    p.code[Back]  = 0x57436699; p.has[Back]  = true;
     p.code[Power] = 0x5743C03Fu; p.has[Power] = true;  // Home
-    p.code[Mute]  = 0x57438679u; p.has[Mute]  = true;  // * / options
+    p.code[Settings] = 0x57438679u; p.has[Settings] = true;  // * / options
     p.code[Up]    = 0x57439867u; p.has[Up]    = true;
     p.code[Down]  = 0x5743CC33u; p.has[Down]  = true;
     p.code[Left]  = 0x57437887u; p.has[Left]  = true;
@@ -2418,7 +2416,8 @@ static void loadBuiltinProfiles() {
     p.proto = decode_type_t::SONY;
     p.bits = 12;
     p.code[Power] = 0x0A90u; p.has[Power] = true;
-    p.code[Settings]  = 0x070u; p.has[Settings]  = true;
+    p.code[Mute]  = 0x0290u; p.has[Mute]  = true;
+    p.code[Settings] = 0x070u; p.has[Settings] = true;  // menu
     p.code[VolUp] = 0x0490u; p.has[VolUp] = true;
     p.code[VolDn] = 0x0C90u; p.has[VolDn] = true;
     p.code[ChUp]  = 0x0090u; p.has[ChUp]  = true;
@@ -3173,16 +3172,18 @@ static void layoutKeyButtons() {
   const int topY = kRemoteKeysTop;
   const int bottomY = universalContentBottom() - 6;
 
-  const int gap = 6;
+  const int gap = 4;
   const int topBtnH = 34;
-  const int topBtnW = (kInfoBoxW - 2 * gap) / 3;
+  const int topBtnW = (kInfoBoxW - 3 * gap) / 4;
   const int yTop = topY;
   const int x0 = kInfoBoxX;
   const int x1 = x0 + topBtnW + gap;
-  const int x2 = kInfoBoxRight - topBtnW;
+  const int x2 = x1 + topBtnW + gap;
+  const int x3 = kInfoBoxRight - topBtnW;
   s_keyBtns[(int)Power] = {(int16_t)x0,(int16_t)yTop,(int16_t)topBtnW,(int16_t)topBtnH,keyLabel(Power),FeatureUI::ButtonStyle::Secondary,true};
-  s_keyBtns[(int)Settings]  = {(int16_t)x1,(int16_t)yTop,(int16_t)topBtnW,(int16_t)topBtnH,keyLabel(Settings), FeatureUI::ButtonStyle::Secondary,true};
-  s_keyBtns[(int)Back]  = {(int16_t)x2,(int16_t)yTop,(int16_t)topBtnW,(int16_t)topBtnH,keyLabel(Back), FeatureUI::ButtonStyle::Secondary,true};
+  s_keyBtns[(int)Settings] = {(int16_t)x1,(int16_t)yTop,(int16_t)topBtnW,(int16_t)topBtnH,keyLabel(Settings), FeatureUI::ButtonStyle::Secondary,true};
+  s_keyBtns[(int)Mute]  = {(int16_t)x2,(int16_t)yTop,(int16_t)topBtnW,(int16_t)topBtnH,keyLabel(Mute), FeatureUI::ButtonStyle::Secondary,true};
+  s_keyBtns[(int)Back]  = {(int16_t)x3,(int16_t)yTop,(int16_t)topBtnW,(int16_t)topBtnH,keyLabel(Back), FeatureUI::ButtonStyle::Secondary,true};
 
   const int yMidTop = yTop + topBtnH + 8;
   const int midH = bottomY - yMidTop;
@@ -3662,15 +3663,6 @@ namespace IRCopyController {
 
 static constexpr int kMaxKeys = 12;
 static const char* kKeyNames[kMaxKeys] = {
-    "Power", "Settings", "VolUp", "VolDn", "ChUp", "ChDn",
-    "Up", "Down", "Left", "Right", "Ok", "Back"
-};
-
-static const char* kKeyLabels[kMaxKeys] = {
-    "PWR", "Settings", "VOL+", "VOL-", "CH+", "CH-",
-    "UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK"
-};
-
     "Power", "Mute", "VolUp", "VolDn", "ChUp", "ChDn",
     "Up", "Down", "Left", "Right", "Ok", "Back"};
 static const char* kKeyLabels[kMaxKeys] = {
@@ -4437,5 +4429,4 @@ void loop() {
   delay(10);
 }
 
-} // namespace IRCopyController
 }  // namespace IRCopyController

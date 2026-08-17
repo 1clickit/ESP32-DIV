@@ -122,10 +122,10 @@ const char *nrf_submenu_items[nrf_NUM_SUBMENU_ITEMS] = {
 const int subghz_NUM_SUBMENU_ITEMS = 7;
 const char *subghz_submenu_items[subghz_NUM_SUBMENU_ITEMS] = {
     "Replay Attack",
+    "Saved Profile",
     "SubGHz Jammer",
     "De Bruijn / Brute",
     "Jamming Detector",
-    "Saved Profile",
     "Freq Scanner",
     "Back to Main Menu"};
 
@@ -168,11 +168,12 @@ const char *gps_submenu_items[gps_NUM_SUBMENU_ITEMS] = {
     "Satellite Scanner",
     "Back to Main Menu"};
 
-const int ir_NUM_SUBMENU_ITEMS = 4;
+const int ir_NUM_SUBMENU_ITEMS = 5;
 const char *ir_submenu_items[ir_NUM_SUBMENU_ITEMS] = {
     "Record",
     "Saved Profile",
     "Universal Controller",
+    "Copy Controller",
     "Back to Main Menu"};
 
 const int about_NUM_SUBMENU_ITEMS = 1;
@@ -253,10 +254,10 @@ const unsigned char *nrf_submenu_icons[nrf_NUM_SUBMENU_ITEMS] = {
 
 const unsigned char *subghz_submenu_icons[subghz_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_antenna,
+    bitmap_icon_list,
     bitmap_icon_no_signal,
     bitmap_icon_graph_self_loop,
     bitmap_icon_Voice_Id,
-    bitmap_icon_list,
     bitmap_icon_scanner,
     bitmap_icon_go_back
 };
@@ -298,6 +299,7 @@ const unsigned char *ir_submenu_icons[ir_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_led,
     bitmap_icon_list,
     bitmap_icon_remote_control,
+    bitmap_icon_follow,
     bitmap_icon_go_back
 };
 
@@ -824,7 +826,9 @@ static void runBleDuckyFeature() {
 #endif
 }
 
-float currentBatteryVoltage = readBatteryVoltage();
+// Hardware buses are initialized in setup() before the first real reading.
+// 3.9V maps to ~75% in the status bar — avoids showing 0% during boot.
+float currentBatteryVoltage = 3.9f;
 unsigned long last_interaction_time = 0;
 
 int last_menu_index = -1;
@@ -3181,11 +3185,11 @@ void handleSubGHzSubmenuButtons() {
             in_sub_menu = true;
             feature_active = true;
             feature_exit_requested = false;
-            subjammer::subjammerSetup();
+            SavedProfile::saveSetup();
             while (current_submenu_index == 1 && !feature_exit_requested) {
                 current_submenu_index = 1;
                 in_sub_menu = true;
-                subjammer::subjammerLoop();
+                SavedProfile::saveLoop();
                 if (featureExitButtonPressed()) {
                     in_sub_menu = true;
                     is_main_menu = false;
@@ -3215,11 +3219,11 @@ void handleSubGHzSubmenuButtons() {
             in_sub_menu = true;
             feature_active = true;
             feature_exit_requested = false;
-            SubBrute::subBruteSetup();
+            subjammer::subjammerSetup();
             while (current_submenu_index == 2 && !feature_exit_requested) {
                 current_submenu_index = 2;
                 in_sub_menu = true;
-                SubBrute::subBruteLoop();
+                subjammer::subjammerLoop();
                 if (featureExitButtonPressed()) {
                     in_sub_menu = true;
                     is_main_menu = false;
@@ -3249,11 +3253,11 @@ void handleSubGHzSubmenuButtons() {
             in_sub_menu = true;
             feature_active = true;
             feature_exit_requested = false;
-            jammingdetector::Setup();
+            SubBrute::subBruteSetup();
             while (current_submenu_index == 3 && !feature_exit_requested) {
                 current_submenu_index = 3;
                 in_sub_menu = true;
-                jammingdetector::Loop();
+                SubBrute::subBruteLoop();
                 if (featureExitButtonPressed()) {
                     in_sub_menu = true;
                     is_main_menu = false;
@@ -3283,11 +3287,11 @@ void handleSubGHzSubmenuButtons() {
             in_sub_menu = true;
             feature_active = true;
             feature_exit_requested = false;
-            SavedProfile::saveSetup();
+            jammingdetector::Setup();
             while (current_submenu_index == 4 && !feature_exit_requested) {
                 current_submenu_index = 4;
                 in_sub_menu = true;
-                SavedProfile::saveLoop();
+                jammingdetector::Loop();
                 if (featureExitButtonPressed()) {
                     in_sub_menu = true;
                     is_main_menu = false;
@@ -3409,11 +3413,11 @@ void handleSubGHzSubmenuButtons() {
                     in_sub_menu = true;
                     feature_active = true;
                     feature_exit_requested = false;
-                    subjammer::subjammerSetup();
+                    SavedProfile::saveSetup();
                     while (current_submenu_index == 1 && !feature_exit_requested) {
                         current_submenu_index = 1;
                         in_sub_menu = true;
-                        subjammer::subjammerLoop();
+                        SavedProfile::saveLoop();
                         if (featureExitButtonPressed()) {
                             in_sub_menu = true;
                             is_main_menu = false;
@@ -3441,11 +3445,11 @@ void handleSubGHzSubmenuButtons() {
                     in_sub_menu = true;
                     feature_active = true;
                     feature_exit_requested = false;
-                    SubBrute::subBruteSetup();
+                    subjammer::subjammerSetup();
                     while (current_submenu_index == 2 && !feature_exit_requested) {
                         current_submenu_index = 2;
                         in_sub_menu = true;
-                        SubBrute::subBruteLoop();
+                        subjammer::subjammerLoop();
                         if (featureExitButtonPressed()) {
                             in_sub_menu = true;
                             is_main_menu = false;
@@ -3473,11 +3477,11 @@ void handleSubGHzSubmenuButtons() {
                     in_sub_menu = true;
                     feature_active = true;
                     feature_exit_requested = false;
-                    jammingdetector::Setup();
+                    SubBrute::subBruteSetup();
                     while (current_submenu_index == 3 && !feature_exit_requested) {
                         current_submenu_index = 3;
                         in_sub_menu = true;
-                        jammingdetector::Loop();
+                        SubBrute::subBruteLoop();
                         if (featureExitButtonPressed()) {
                             in_sub_menu = true;
                             is_main_menu = false;
@@ -3505,11 +3509,11 @@ void handleSubGHzSubmenuButtons() {
                     in_sub_menu = true;
                     feature_active = true;
                     feature_exit_requested = false;
-                    SavedProfile::saveSetup();
+                    jammingdetector::Setup();
                     while (current_submenu_index == 4 && !feature_exit_requested) {
                         current_submenu_index = 4;
                         in_sub_menu = true;
-                        SavedProfile::saveLoop();
+                        jammingdetector::Loop();
                         if (featureExitButtonPressed()) {
                             in_sub_menu = true;
                             is_main_menu = false;
@@ -4046,6 +4050,38 @@ void handleOtherSubmenuButtons() {
                     displaySubmenu();
                     delay(200);
                 }
+            } else if (current_submenu_index == 3) {
+                current_submenu_index = 3;
+                in_sub_menu = true;
+                feature_active = true;
+                feature_exit_requested = false;
+                IRCopyController::setup();
+                while (current_submenu_index == 3 && !feature_exit_requested) {
+                    current_submenu_index = 3;
+                    in_sub_menu = true;
+                    IRCopyController::loop();
+                    if (featureExitButtonPressed()) {
+                        in_sub_menu = true;
+                        is_main_menu = false;
+                        submenu_initialized = false;
+                        feature_active = false;
+                        feature_exit_requested = false;
+                        displaySubmenu();
+                        delay(200);
+                        while (featureExitButtonPressed()) {
+                        }
+                        break;
+                    }
+                }
+                if (feature_exit_requested) {
+                    in_sub_menu = true;
+                    is_main_menu = false;
+                    submenu_initialized = false;
+                    feature_active = false;
+                    feature_exit_requested = false;
+                    displaySubmenu();
+                    delay(200);
+                }
             }
         } else if (other_layer == OTHER_LAYER_RFID) {
             if (current_submenu_index == rfid_NUM_SUBMENU_ITEMS - 1) {
@@ -4241,6 +4277,38 @@ void handleOtherSubmenuButtons() {
                     current_submenu_index = 2;
                     in_sub_menu = true;
                     IRUniversalController::loop();
+                    if (featureExitButtonPressed()) {
+                        in_sub_menu = true;
+                        is_main_menu = false;
+                        submenu_initialized = false;
+                        feature_active = false;
+                        feature_exit_requested = false;
+                        displaySubmenu();
+                        delay(200);
+                        while (featureExitButtonPressed()) {
+                        }
+                        break;
+                    }
+                }
+                if (feature_exit_requested) {
+                    in_sub_menu = true;
+                    is_main_menu = false;
+                    submenu_initialized = false;
+                    feature_active = false;
+                    feature_exit_requested = false;
+                    displaySubmenu();
+                    delay(200);
+                }
+            } else if (current_submenu_index == 3) {
+                current_submenu_index = 3;
+                in_sub_menu = true;
+                feature_active = true;
+                feature_exit_requested = false;
+                IRCopyController::setup();
+                while (current_submenu_index == 3 && !feature_exit_requested) {
+                    current_submenu_index = 3;
+                    in_sub_menu = true;
+                    IRCopyController::loop();
                     if (featureExitButtonPressed()) {
                         in_sub_menu = true;
                         is_main_menu = false;
@@ -4508,9 +4576,9 @@ void handleButtons() {
         }
 
         static unsigned long lastTouchTime = 0;
-        const unsigned long touchFeedbackDelay = 100;
+        const unsigned long touchCooldownMs = 280;
 
-        if (!feature_active && (millis() - lastTouchTime >= touchFeedbackDelay)) {
+        if (!feature_active && (millis() - lastTouchTime >= touchCooldownMs)) {
             int x, y;
             if (!readTouchXY(x, y)) { return; }
             delay(10);
@@ -4528,12 +4596,12 @@ void handleButtons() {
                 if (x >= button_x1 && x <= button_x2 && y >= button_y1 && y <= button_y2) {
                     current_menu_index = i;
                     last_interaction_time = millis();
+                    lastTouchTime = millis();
                     displayMenu();
 
-                    // Tap-to-select: any tap that lands on a tile activates it.
-                    // Wait (bounded) for the finger to lift so we act once per
-                    // tap, instead of requiring the touch to still be held after
-                    // 100 ms (which made quick taps only highlight, not enter).
+                    // Quick taps used to only highlight: old code required the
+                    // finger to still be down after 100 ms. Wait for lift (bounded),
+                    // then always enter — same as submenu tiles.
                     unsigned long startTime = millis();
                     while (isTouchDownDismiss() && (millis() - startTime < 600)) {
                         delay(5);
@@ -4565,7 +4633,8 @@ void handleButtons() {
                             }
                         }
                     }
-                    delay(150);
+                    lastTouchTime = millis();
+                    delay(200);
                     break;
                 }
             }

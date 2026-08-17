@@ -4279,50 +4279,74 @@ void Loop() {
 }  // namespace jammingdetector
 
 /*──────────────────── Frequency Scanner ────────────────────*/
-// Continuously sweeps a sub-GHz band back and forth, sampling CC1101 RSSI at
-// each step. Channels whose signal crosses an adaptive activity threshold are
-// logged into a tally table (freq -> hit count, peak RSSI) shown as a live,
-// activity-sorted list. Runs until the user cancels (center "Exit" / SELECT).
+// Sweeps a sub-GHz band back and forth, sampling CC1101 RSSI. Channels above
+// an adaptive activity threshold are listed by hit count. Exit via center/SELECT.
 namespace freqscanner {
 
 struct Band { uint32_t startHz; uint32_t endHz; uint32_t stepHz; const char* label; };
 
-// Presets sit inside the CC1101 valid tuning ranges (300-348 / 387-464 / 779-928 MHz).
 static const Band kBands[] = {
-  {300000000UL, 348000000UL,  500000UL, "300-348"},   // 315 MHz region
-  {387000000UL, 464000000UL,  250000UL, "387-464"},   // 433.92 MHz ISM
-  {779000000UL, 928000000UL, 1000000UL, "779-928"},   // 868 / 915 MHz
+  {300000000UL, 348000000UL, 500000UL,  "300-348"},
+  {387000000UL, 464000000UL, 250000UL,  "387-464"},
+  {779000000UL, 928000000UL, 1000000UL, "779-928"},
 };
 static constexpr uint8_t kBandCount = sizeof(kBands) / sizeof(kBands[0]);
-static uint8_t bandIdx = 1;                            // default: 433 MHz band
+static uint8_t bandIdx = 1;
 
-// Sweep state
 static uint32_t curHz = 0;
-static int8_t   sweepDir = 1;                          // +1 rising, -1 falling
+static int8_t sweepDir = 1;
 static uint16_t stepTotal = 0;
 static uint16_t stepPos = 0;
-static bool     paused = false;
+static bool paused = false;
 
-// Activity detection
-static constexpr int FS_ABS_FLOOR_DBM = -82;           // ignore anything weaker
-static constexpr int FS_MARGIN_DB     = 14;            // dB above noise floor = active
-static float    noiseFloor = -95.0f;
-static uint32_t totalHits  = 0;                        // active detections this session
-static uint32_t sweepCount = 0;                        // completed passes (each direction)
+static constexpr int FS_ABS_FLOOR_DBM = -70;
+static constexpr int FS_MARGIN_DB = 18;
+static constexpr uint8_t FS_WARMUP_STEPS = 24;
+static float noiseFloor = -90.0f;
+static uint32_t totalHits = 0;
+static uint32_t sweepCount = 0;
+static uint8_t warmupLeft = FS_WARMUP_STEPS;
 
-// Tally table
 static constexpr uint8_t FS_MAX_HITS = 14;
 struct Hit { uint32_t freqKHz; uint32_t count; int8_t lastRssi; int8_t peakRssi; };
-static Hit    hits[FS_MAX_HITS];
+static Hit hits[FS_MAX_HITS];
 static uint8_t hitCount = 0;
 
-// UI cache / input
 static uint32_t lastDrawMs = 0;
 static bool prevL = false, prevR = false, prevU = false, prevD = false;
 
-static constexpr int FS_HDR_Y  = 20;
-static constexpr int FS_LIST_Y = 62;
+static constexpr int FS_BAR_Y  = 20;
+static constexpr int FS_BAR_H  = 16;
+static constexpr int FS_HDR_Y  = 40;
+static constexpr int FS_LIST_Y = 70;
 static constexpr int FS_ROW_H  = 16;
+static constexpr int FS_COL_FREQ = 6;
+static constexpr int FS_COL_HITS = 120;
+static constexpr int FS_COL_DBM  = 180;
+
+static char s_lastStatus[36];
+static uint16_t s_lastStatusColor = 0;
+static uint8_t s_lastDrawnCount = 255;
+static uint32_t s_lastFreqKHz[FS_MAX_HITS];
+static uint32_t s_lastHitN[FS_MAX_HITS];
+static int8_t s_lastPeak[FS_MAX_HITS];
+static bool s_showedListening = false;
+static bool s_fsUiDrawn = false;
+
+static constexpr int FS_ICON_SZ = 16;
+static constexpr int FS_BACK_X = 10;
+
+static void fsInvalidateDraw() {
+  s_lastStatus[0] = '\0';
+  s_lastStatusColor = 0;
+  s_lastDrawnCount = 255;
+  s_showedListening = false;
+  for (uint8_t i = 0; i < FS_MAX_HITS; i++) {
+    s_lastFreqKHz[i] = 0xFFFFFFFFu;
+    s_lastHitN[i] = 0xFFFFFFFFu;
+    s_lastPeak[i] = 127;
+  }
+}
 
 static bool fsEdge(int pin, bool& prev) {
   const bool now = isPhysicalButtonPressed(pin);
@@ -4336,29 +4360,30 @@ static void fsCc1101Begin() {
   ELECHOUSE_cc1101.setGDO(CC1101_GDO0, CC1101_GDO2);
   ELECHOUSE_cc1101.Init();
   ELECHOUSE_cc1101.setCCMode(0);
-  ELECHOUSE_cc1101.setModulation(2);                   // ASK/OOK - energy detection
-  ELECHOUSE_cc1101.setRxBW(650.0);
+  ELECHOUSE_cc1101.setModulation(2);
+  ELECHOUSE_cc1101.setRxBW(270.0);
   ELECHOUSE_cc1101.SetRx();
 }
 
 static void fsResetStats() {
-  hitCount   = 0;
-  totalHits  = 0;
+  hitCount = 0;
+  totalHits = 0;
   sweepCount = 0;
-  noiseFloor = -95.0f;
+  noiseFloor = -90.0f;
+  warmupLeft = FS_WARMUP_STEPS;
 }
 
 static void fsBuildBand() {
   const Band& b = kBands[bandIdx];
   stepTotal = (uint16_t)((b.endHz - b.startHz) / b.stepHz) + 1;
-  stepPos   = 0;
-  sweepDir  = 1;
-  curHz     = b.startHz;
+  stepPos = 0;
+  sweepDir = 1;
+  curHz = b.startHz;
 }
 
 static void fsRecordHit(uint32_t hz, int rssi) {
   totalHits++;
-  const uint32_t key = hz / 1000;                      // kHz grid key
+  const uint32_t key = hz / 1000;
   for (uint8_t i = 0; i < hitCount; i++) {
     if (hits[i].freqKHz == key) {
       hits[i].count++;
@@ -4371,9 +4396,6 @@ static void fsRecordHit(uint32_t hz, int rssi) {
   if (hitCount < FS_MAX_HITS) {
     slot = hitCount++;
   } else {
-    // Table full: evict the weakest (lowest count, then lowest peak) so the
-    // most-active channels persist. Skip if the weakest is already a repeat
-    // hitter, to avoid thrashing on transient single hits.
     slot = 0;
     for (uint8_t i = 1; i < hitCount; i++) {
       if (hits[i].count < hits[slot].count ||
@@ -4383,38 +4405,58 @@ static void fsRecordHit(uint32_t hz, int rssi) {
     }
     if (hits[slot].count > 1) return;
   }
-  hits[slot].freqKHz  = key;
-  hits[slot].count    = 1;
+  hits[slot].freqKHz = key;
+  hits[slot].count = 1;
   hits[slot].lastRssi = (int8_t)rssi;
   hits[slot].peakRssi = (int8_t)rssi;
 }
 
-static int fsSampleRssi(uint32_t hz) {
+static void fsUpdateFloor(int rssi) {
+  // Fast drop / slow rise so urban noise isn't frozen as "signal".
+  if ((float)rssi < noiseFloor) {
+    noiseFloor = 0.70f * noiseFloor + 0.30f * (float)rssi;
+  } else {
+    noiseFloor = 0.98f * noiseFloor + 0.02f * (float)rssi;
+  }
+}
+
+static int fsSampleRssi(uint32_t hz, int samples[3]) {
   ELECHOUSE_cc1101.setSidle();
   ELECHOUSE_cc1101.setMHZ(hz / 1000000.0);
   ELECHOUSE_cc1101.SetRx();
-  delayMicroseconds(1200);                             // let AGC/RSSI settle after retune
-  int peak = -127;
+  delayMicroseconds(1500);
   for (uint8_t k = 0; k < 3; k++) {
-    const int r = ELECHOUSE_cc1101.getRssi();
-    if (r > peak) peak = r;
-    delayMicroseconds(300);
+    samples[k] = ELECHOUSE_cc1101.getRssi();
+    delayMicroseconds(350);
   }
-  return peak;
+  int lo = samples[0], mid = samples[1], hi = samples[2];
+  if (lo > mid) { const int t = lo; lo = mid; mid = t; }
+  if (mid > hi) { const int t = mid; mid = hi; hi = t; }
+  if (lo > mid) { const int t = lo; lo = mid; mid = t; }
+  return mid;
 }
 
 static void fsAdvance() {
+  int samples[3];
+  const int rssi = fsSampleRssi(curHz, samples);
+  fsUpdateFloor(rssi);
+
   const Band& b = kBands[bandIdx];
-  const int rssi = fsSampleRssi(curHz);
-
-  // Track the noise floor from the quiet readings only.
-  if ((float)rssi < noiseFloor + FS_MARGIN_DB) {
-    noiseFloor = 0.97f * noiseFloor + 0.03f * (float)rssi;
+  if (warmupLeft > 0) {
+    warmupLeft--;
+  } else {
+    const int thresh = max(FS_ABS_FLOOR_DBM, (int)(noiseFloor + FS_MARGIN_DB));
+    uint8_t above = 0;
+    int peak = samples[0];
+    for (uint8_t k = 0; k < 3; k++) {
+      if (samples[k] > peak) peak = samples[k];
+      if (samples[k] >= thresh) above++;
+    }
+    if (above >= 2 && peak >= thresh) {
+      fsRecordHit(curHz, peak);
+    }
   }
-  const int thresh = max(FS_ABS_FLOOR_DBM, (int)(noiseFloor + FS_MARGIN_DB));
-  if (rssi >= thresh) fsRecordHit(curHz, rssi);
 
-  // Step, bouncing between the band edges (back and forth).
   if (sweepDir > 0) {
     if (stepPos + 1 >= stepTotal) { sweepDir = -1; sweepCount++; }
     else { stepPos++; curHz += b.stepHz; }
@@ -4436,69 +4478,189 @@ static void fsSortIndices(uint8_t* order) {
 }
 
 static void fsDrawStaticChrome() {
-  const Band& b = kBands[bandIdx];
   const int bottom = subghzContentBottom();
   tft.fillRect(0, FS_HDR_Y, 240, bottom - FS_HDR_Y, TFT_BLACK);
 
   tft.setTextSize(1);
-  tft.setTextColor(UI_ACCENT, TFT_BLACK);
-  tft.setCursor(6, FS_HDR_Y + 2);
-  tft.print("SWEEP ");
-  tft.print(b.label);
-  tft.print(" MHz");
-
   tft.setTextColor(UI_DIM_TEXT, TFT_BLACK);
-  tft.setCursor(6,   FS_LIST_Y - 12);
+  tft.setCursor(FS_COL_FREQ, FS_LIST_Y - 12);
   tft.print("FREQ(MHz)");
-  tft.setCursor(120, FS_LIST_Y - 12);
+  tft.setCursor(FS_COL_HITS, FS_LIST_Y - 12);
   tft.print("HITS");
-  tft.setCursor(180, FS_LIST_Y - 12);
+  tft.setCursor(FS_COL_DBM, FS_LIST_Y - 12);
   tft.print("dBm");
   tft.drawFastHLine(0, FS_LIST_Y - 2, 240, UI_LINE);
+  fsInvalidateDraw();
 }
 
-static void fsDrawDynamic() {
-  char buf[40];
-
-  // Header status line: direction/pause, current freq, floor, total active.
-  tft.fillRect(0, FS_HDR_Y + 14, 240, 14, TFT_BLACK);
-  tft.setTextSize(1);
-  tft.setTextColor(paused ? UI_WARN : UI_OK, TFT_BLACK);
-  tft.setCursor(6, FS_HDR_Y + 16);
-  const char dirc = paused ? '=' : (sweepDir > 0 ? '>' : '<');
-  snprintf(buf, sizeof(buf), "%c %.2f  Flr%d  Act%lu",
-           dirc, curHz / 1000000.0, (int)noiseFloor, (unsigned long)totalHits);
-  tft.print(buf);
-
-  // Active-channel list, sorted by hit count (busiest first).
-  uint8_t order[FS_MAX_HITS];
-  fsSortIndices(order);
+static int fsListMaxRows() {
   const int bottom = subghzContentBottom();
   int maxRows = (bottom - FS_LIST_Y) / FS_ROW_H;
   if (maxRows > FS_MAX_HITS) maxRows = FS_MAX_HITS;
   if (maxRows < 0) maxRows = 0;
+  return maxRows;
+}
 
-  tft.fillRect(0, FS_LIST_Y, 240, maxRows * FS_ROW_H, TFT_BLACK);
+static void fsDrawStatusLine() {
+  char buf[36];
+  const char dirc = paused ? '=' : (sweepDir > 0 ? '>' : '<');
+  snprintf(buf, sizeof(buf), "%c %7.2f Flr%4d Act%-5lu",
+           dirc, curHz / 1000000.0, (int)noiseFloor, (unsigned long)totalHits);
+  const uint16_t color = paused ? UI_WARN : UI_OK;
+  if (color == s_lastStatusColor && strcmp(buf, s_lastStatus) == 0) {
+    return;
+  }
+  tft.setTextSize(1);
+  tft.setTextColor(color, TFT_BLACK);
+  tft.setCursor(6, FS_HDR_Y + 2);
+  tft.print(buf);
+  tft.print("   ");
+  strncpy(s_lastStatus, buf, sizeof(s_lastStatus) - 1);
+  s_lastStatus[sizeof(s_lastStatus) - 1] = '\0';
+  s_lastStatusColor = color;
+}
+
+static void fsDrawListRow(int row, const Hit& h) {
+  const int y = FS_LIST_Y + row * FS_ROW_H + 3;
+  char buf[16];
+  tft.setTextSize(1);
+  tft.setTextColor(UI_TEXT, TFT_BLACK);
+
+  snprintf(buf, sizeof(buf), "%7.2f", h.freqKHz / 1000.0);
+  tft.setCursor(FS_COL_FREQ, y);
+  tft.print(buf);
+
+  snprintf(buf, sizeof(buf), "x%-5lu", (unsigned long)h.count);
+  tft.setCursor(FS_COL_HITS, y);
+  tft.print(buf);
+
+  snprintf(buf, sizeof(buf), "%-4d", (int)h.peakRssi);
+  tft.setCursor(FS_COL_DBM, y);
+  tft.print(buf);
+}
+
+static void fsClearListRow(int row) {
+  tft.fillRect(0, FS_LIST_Y + row * FS_ROW_H, 240, FS_ROW_H, TFT_BLACK);
+}
+
+static void fsDrawDynamic() {
+  fsDrawStatusLine();
+
+  const int maxRows = fsListMaxRows();
+  uint8_t order[FS_MAX_HITS];
+  fsSortIndices(order);
 
   if (hitCount == 0) {
-    tft.setTextColor(UI_DIM_TEXT, TFT_BLACK);
-    tft.setCursor(6, FS_LIST_Y + 3);
-    tft.print("listening...");
+    if (!s_showedListening) {
+      tft.fillRect(0, FS_LIST_Y, 240, maxRows * FS_ROW_H, TFT_BLACK);
+      tft.setTextSize(1);
+      tft.setTextColor(UI_DIM_TEXT, TFT_BLACK);
+      tft.setCursor(6, FS_LIST_Y + 3);
+      tft.print("listening...");
+      s_showedListening = true;
+      s_lastDrawnCount = 0;
+      for (uint8_t i = 0; i < FS_MAX_HITS; i++) {
+        s_lastFreqKHz[i] = 0xFFFFFFFFu;
+        s_lastHitN[i] = 0xFFFFFFFFu;
+        s_lastPeak[i] = 127;
+      }
+    }
     return;
   }
 
-  for (int i = 0; i < maxRows && i < hitCount; i++) {
-    const Hit& h = hits[order[i]];
-    const int y = FS_LIST_Y + i * FS_ROW_H;
-    const bool onNow = (!paused && h.freqKHz == curHz / 1000);
-    tft.setTextColor(onNow ? UI_ACCENT : UI_TEXT, TFT_BLACK);
+  if (s_showedListening) {
+    tft.fillRect(0, FS_LIST_Y, 240, FS_ROW_H, TFT_BLACK);
+    s_showedListening = false;
+  }
 
-    snprintf(buf, sizeof(buf), "%8.2f", h.freqKHz / 1000.0);
-    tft.setCursor(6, y + 3);   tft.print(buf);
-    snprintf(buf, sizeof(buf), "x%lu", (unsigned long)h.count);
-    tft.setCursor(120, y + 3); tft.print(buf);
-    snprintf(buf, sizeof(buf), "%d", h.peakRssi);
-    tft.setCursor(180, y + 3); tft.print(buf);
+  const int shown = (hitCount < maxRows) ? hitCount : maxRows;
+  for (int i = 0; i < shown; i++) {
+    const Hit& h = hits[order[i]];
+    if (s_lastFreqKHz[i] == h.freqKHz && s_lastHitN[i] == h.count && s_lastPeak[i] == h.peakRssi) {
+      continue;
+    }
+    fsDrawListRow(i, h);
+    s_lastFreqKHz[i] = h.freqKHz;
+    s_lastHitN[i] = h.count;
+    s_lastPeak[i] = h.peakRssi;
+  }
+
+  if (s_lastDrawnCount != 255 && s_lastDrawnCount > shown) {
+    for (int i = shown; i < s_lastDrawnCount && i < maxRows; i++) {
+      fsClearListRow(i);
+      s_lastFreqKHz[i] = 0xFFFFFFFFu;
+    }
+  }
+  s_lastDrawnCount = (uint8_t)shown;
+}
+
+static void fsSetNavLabels() {
+  setTouchNavLabels("Band-", "Clear", "Exit", paused ? "Resume" : "Pause", "Band+");
+  subghzRedrawNavChrome();
+}
+
+static void fsDrawToolbarTitle() {
+  const Band& b = kBands[bandIdx];
+  char title[28];
+  snprintf(title, sizeof(title), "SWEEP %s MHz", b.label);
+
+  tft.fillRect(30, FS_BAR_Y, 210, FS_BAR_H, DARK_GRAY);
+  tft.setTextFont(1);
+  tft.setTextSize(1);
+  tft.setTextColor(UI_TEXT, DARK_GRAY);
+  const int tw = tft.textWidth(title);
+  const int x = 240 - tw - 6;
+  tft.setCursor(x < 30 ? 30 : x, FS_BAR_Y + 4);
+  tft.print(title);
+}
+
+static void fsDrawToolbar() {
+  tft.fillRect(0, FS_BAR_Y, 240, FS_BAR_H, DARK_GRAY);
+  tft.drawBitmap(FS_BACK_X, FS_BAR_Y, bitmap_icon_go_back, FS_ICON_SZ, FS_ICON_SZ, UI_ICON);
+  fsDrawToolbarTitle();
+  tft.drawFastHLine(0, 19, 240, UI_LINE);
+  tft.drawFastHLine(0, FS_BAR_Y + FS_BAR_H, 240, UI_LINE);
+  s_fsUiDrawn = true;
+}
+
+static void fsChangeBand(int dir) {
+  bandIdx = (uint8_t)((bandIdx + kBandCount + dir) % kBandCount);
+  fsResetStats();
+  fsBuildBand();
+  fsDrawToolbarTitle();
+  fsDrawStaticChrome();
+  fsDrawDynamic();
+}
+
+static void fsClearHits() {
+  fsResetStats();
+  fsBuildBand();
+  fsDrawStaticChrome();
+  fsDrawDynamic();
+}
+
+static void fsTogglePause() {
+  paused = !paused;
+  s_lastStatus[0] = '\0';
+  fsSetNavLabels();
+  fsDrawStatusLine();
+}
+
+static void fsRunUI() {
+  if (!s_fsUiDrawn) {
+    fsDrawToolbar();
+  }
+
+  static unsigned long lastTouchCheck = 0;
+  if (millis() - lastTouchCheck >= 50) {
+    int x, y;
+    if (feature_active && readTouchXY(x, y)) {
+      if (y > FS_BAR_Y && y < FS_BAR_Y + FS_BAR_H &&
+          x > FS_BACK_X && x < FS_BACK_X + FS_ICON_SZ) {
+        feature_exit_requested = true;
+      }
+    }
+    lastTouchCheck = millis();
   }
 }
 
@@ -4509,18 +4671,16 @@ static void fsHandleInput() {
   const bool navClear    = featureHasTouchNavBar() && isTouchNavButtonPressedEdge(BTN_DOWN);
 
   if (fsEdge(BTN_LEFT, prevL) || navBandDown) {
-    bandIdx = (bandIdx + kBandCount - 1) % kBandCount;
-    fsResetStats(); fsBuildBand(); fsDrawStaticChrome();
+    fsChangeBand(-1);
   }
   if (fsEdge(BTN_RIGHT, prevR) || navBandUp) {
-    bandIdx = (bandIdx + 1) % kBandCount;
-    fsResetStats(); fsBuildBand(); fsDrawStaticChrome();
+    fsChangeBand(+1);
   }
   if (fsEdge(BTN_UP, prevU) || navPause) {
-    paused = !paused;
+    fsTogglePause();
   }
   if (fsEdge(BTN_DOWN, prevD) || navClear) {
-    fsResetStats(); fsDrawStaticChrome();
+    fsClearHits();
   }
 }
 
@@ -4532,12 +4692,13 @@ static void fsExitCleanup() {
 void Setup() {
   pauseBackgroundRadioTasks();
   setTouchButtonInputEnabled(true);
-  setTouchNavLabels("Band-", "Clear", "Exit", "Pause", "Band+");
+  paused = false;
+  fsSetNavLabels();
 
   holdSdInactiveOnSharedSpi();
   reclaimSharedSpiBus();
 #if defined(SD_CS)
-  pinMode(SD_CS, OUTPUT);   digitalWrite(SD_CS, HIGH);
+  pinMode(SD_CS, OUTPUT); digitalWrite(SD_CS, HIGH);
 #endif
 #if defined(CC1101_CS)
   pinMode(CC1101_CS, OUTPUT); digitalWrite(CC1101_CS, HIGH);
@@ -4557,10 +4718,12 @@ void Setup() {
   paused = false;
   prevL = prevR = prevU = prevD = false;
   lastDrawMs = 0;
+  s_fsUiDrawn = false;
 
   tft.setRotation(TFT_ROTATION);
   subghzClearBody(TFT_BLACK);
   drawStatusBar(readBatteryVoltage(), true);
+  fsDrawToolbar();
   subghzRedrawNavChrome();
   setupTouchscreen();
   fsDrawStaticChrome();
@@ -4575,15 +4738,22 @@ void Loop() {
   }
 
   maintainTouchNavBar();
+  fsRunUI();
   fsHandleInput();
 
   if (!paused) {
-    // Sweep a chunk of channels per Loop() so exit stays responsive between calls.
-    for (uint8_t n = 0; n < 10; n++) fsAdvance();
+    for (uint8_t n = 0; n < 6; n++) {
+      if (feature_exit_requested || featureExitButtonPressed()) {
+        fsExitCleanup();
+        feature_exit_requested = true;
+        return;
+      }
+      fsAdvance();
+    }
   }
 
   const uint32_t now = millis();
-  if (now - lastDrawMs >= 160) {
+  if (now - lastDrawMs >= 220) {
     lastDrawMs = now;
     fsDrawDynamic();
   }

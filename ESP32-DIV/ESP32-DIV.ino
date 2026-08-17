@@ -4530,41 +4530,42 @@ void handleButtons() {
                     last_interaction_time = millis();
                     displayMenu();
 
+                    // Tap-to-select: any tap that lands on a tile activates it.
+                    // Wait (bounded) for the finger to lift so we act once per
+                    // tap, instead of requiring the touch to still be held after
+                    // 100 ms (which made quick taps only highlight, not enter).
                     unsigned long startTime = millis();
-                    while (isTouchDownDismiss() && (millis() - startTime < touchFeedbackDelay)) {
-                        delay(10);
+                    while (isTouchDownDismiss() && (millis() - startTime < 600)) {
+                        delay(5);
                     }
 
-                    if (isTouchDownDismiss()) {
+                    if (current_menu_index == 3) {
+                        handleSettingsSubmenuButtons();
+                    } else if (current_menu_index == 7) {
+                        handleAboutPage();
+                    } else {
+                        updateActiveSubmenu();
 
-                        if (current_menu_index == 3) {
-                            handleSettingsSubmenuButtons();
-                        } else if (current_menu_index == 7) {
-                            handleAboutPage();
+                        if (active_submenu_items && active_submenu_size > 0) {
+                            current_submenu_index = 0;
+                            if (current_menu_index == 2) {
+                                other_layer = OTHER_LAYER_HOME;
+                                other_menu_grid_initialized = false;
+                                last_other_menu_index = -1;
+                            }
+                            in_sub_menu = true;
+                            submenu_initialized = false;
+                            displaySubmenu();
                         } else {
-                            updateActiveSubmenu();
-
-                            if (active_submenu_items && active_submenu_size > 0) {
-                                current_submenu_index = 0;
-                                if (current_menu_index == 2) {
-                                    other_layer = OTHER_LAYER_HOME;
-                                    other_menu_grid_initialized = false;
-                                    last_other_menu_index = -1;
-                                }
-                                in_sub_menu = true;
-                                submenu_initialized = false;
-                                displaySubmenu();
+                            if (is_main_menu) {
+                                is_main_menu = false;
+                                displayMenu();
                             } else {
-                                if (is_main_menu) {
-                                    is_main_menu = false;
-                                    displayMenu();
-                                } else {
-                                    is_main_menu = true;
-                                }
+                                is_main_menu = true;
                             }
                         }
                     }
-                    delay(200);
+                    delay(150);
                     break;
                 }
             }

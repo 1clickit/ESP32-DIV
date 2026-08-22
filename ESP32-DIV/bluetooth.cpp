@@ -104,6 +104,10 @@ static void bleSetExitOnlyNavLabels() {
   setTouchNavLabels(nullptr, nullptr, "Exit", nullptr, nullptr);
 }
 
+static void bleSetSnifferNavLabels(bool paused) {
+  setTouchNavLabels(nullptr, nullptr, "Exit", nullptr, paused ? "Resume" : "Pause");
+}
+
 static void bleSetJammerNavLabels() {
   setTouchNavLabels("Mode-", nullptr, "Exit", "Toggle", "Mode+");
 }
@@ -8955,7 +8959,9 @@ private:
   int lastDeviceCount = -1;
   int lastSuspiciousCount = -1;
   bool scanning = true;
+  bool paused = false;
   bool isBLEScanActive = true;
+  unsigned long pauseStartedAt = 0;
   unsigned long lastScanTime = 0;
   unsigned long lastFlashToggle = 0;
   bool flashState = false;
@@ -9009,15 +9015,15 @@ private:
     tft.fillRect(0, Y_OFFSET, tft.width(), HEADER_HEIGHT, DARK_GRAY);
     tft.setTextColor(WHITE, DARK_GRAY);
     tft.setCursor(5, Y_OFFSET + 6);
-    String status = isBLEScanActive ? "BLE Scanning" : "BT Scanning";
+    String status = paused ? "Paused" : (isBLEScanActive ? "BLE Scanning" : "BT Scanning");
     tft.print(status + " | Dev: " + String(deviceCount) + " Sus: " + String(suspiciousCount));
-    uint16_t dotColor = isBLEScanActive ? BLUE : GREEN;
+    uint16_t dotColor = paused ? ORANGE : (isBLEScanActive ? BLUE : GREEN);
     tft.fillCircle(tft.width() - 10, 46, STATUS_DOT_SIZE / 2, dotColor);
     tft.drawFastHLine(0, 56, 240, UI_LINE);
   }
 
   void updateDisplay() {
-    if (!scanning) return;
+    if (!scanning || paused) return;
     unsigned long now = millis();
     if (now - lastFlashToggle >= 500) {
       flashState = !flashState;
@@ -9063,7 +9069,7 @@ private:
   }
 
   void addLine(String text, uint16_t color, bool isAlert = false, MessageType type = MessageType::DEVICE) {
-    if (!scanning) return;
+    if (!scanning || paused) return;
     if (text.length() > MAX_LINE_LENGTH) {
       text = text.substring(0, MAX_LINE_LENGTH - 3) + "...";
     }
@@ -9374,6 +9380,7 @@ public:
     pBLEScan->setAdvertisedDeviceCallbacks(bleDeviceCallbacks);
     pBLEScan->setActiveScan(true);
     scanning = true;
+    paused = false;
 
     addLine("Bluetooth Sniffer Ready", DARK_GRAY, true, MessageType::STATUS);
     startBLEScan();
@@ -9387,6 +9394,13 @@ public:
 
     unsigned long now = millis();
     tft.drawFastHLine(0, 19, 240, UI_LINE);
+
+    if (isButtonPressedEdge(BTN_RIGHT)) {
+      setPaused(!paused);
+    }
+    if (paused) {
+      return;
+    }
 
     runUI();
     if (feature_exit_requested || featureExitButtonPressed()) {
@@ -9439,7 +9453,7 @@ public:
   public:
     AdvertisedDeviceCallbacks(BluetoothSniffer& s) : sniffer(s) {}
     void onResult(BLEAdvertisedDevice* advertisedDevice) override {
-      if (!sniffer.scanning) return;
+      if (!sniffer.scanning || sniffer.paused) return;
       String mac = advertisedDevice->getAddress().toString().c_str();
       int rssi = advertisedDevice->getRSSI();
       unsigned long timestamp = millis();
@@ -9462,7 +9476,7 @@ public:
   };
 
   static void btCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
-    if (!snifferInstance) return;
+    if (!snifferInstance || !snifferInstance->scanning || snifferInstance->paused) return;
     if (event == ESP_BT_GAP_DISC_RES_EVT) {
       unsigned long timestamp = millis();
       int idx = -1;
@@ -9515,8 +9529,36 @@ public:
     snifferInstance = this;
   }
 
+  void setPaused(bool shouldPause) {
+    if (paused == shouldPause) return;
+
+    if (shouldPause) {
+      paused = true;
+      pauseStartedAt = millis();
+      if (pBLEScan) {
+        pBLEScan->stop();
+      }
+      bleSetSnifferNavLabels(true);
+      redrawTouchButtonBar();
+      updateHeader();
+      return;
+    }
+
+    const unsigned long pauseDuration = millis() - pauseStartedAt;
+    for (int i = 0; i < deviceCount; i++) {
+      devices[i].lastSeen += pauseDuration;
+    }
+    paused = false;
+    bleSetSnifferNavLabels(false);
+    redrawTouchButtonBar();
+    isBLEScanActive = true;
+    startBLEScan();
+    lastScanTime = millis();
+  }
+
   void stop() {
     scanning = false;
+    paused = false;
     snifferInstance = nullptr;
     releaseBleCallbacks();
   }
@@ -9528,7 +9570,7 @@ BluetoothSniffer sniffer;
 void blesnifferSetup() {
   pauseBackgroundRadioTasks();
   setTouchButtonInputEnabled(true);
-  bleSetExitOnlyNavLabels();
+  bleSetSnifferNavLabels(false);
   bleClearBody(TFT_BLACK);
   {
     float currentBatteryVoltage = readBatteryVoltage();

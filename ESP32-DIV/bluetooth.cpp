@@ -9454,9 +9454,6 @@ public:
         sniffer.devices[idx].rssi = rssi;
         sniffer.devices[idx].packetCount++;
         sniffer.devices[idx].lastSeen = timestamp;
-        if (sniffer.isRandomizedMac(mac)) {
-          sniffer.devices[idx].macChangeCount++;
-        }
         sniffer.checkSuspiciousActivity(idx, timestamp);
       } else {
         sniffer.processNewDevice(advertisedDevice, nullptr, timestamp, true);

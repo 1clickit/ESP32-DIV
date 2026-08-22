@@ -25,6 +25,9 @@
 
 &nbsp;
 
+> [!NOTE]
+> ESP32-2432S028 CYD development is maintained on the `cyd-custom` branch. See [CYD customization notes](CYD_CUSTOMIZATION_NOTES.md) for the tested 4 MB configuration, BLE fixes, and open investigations.
+
 ## 📖 Explore the ESP32-DIV Wiki
 
 Complete project story, in-depth tutorials, and all the features in [Wiki](https://github.com/cifertech/ESP32-DIV/wiki)! From Wi-Fi deauthentication attacks to Sub-GHz signal replay, the Wiki covers everything you need to get started. [Click here to explore now!](https://github.com/cifertech/ESP32-DIV/wiki)

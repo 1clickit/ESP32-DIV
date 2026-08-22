@@ -104,8 +104,21 @@ static void bleSetExitOnlyNavLabels() {
   setTouchNavLabels(nullptr, nullptr, "Exit", nullptr, nullptr);
 }
 
-static void bleSetSnifferNavLabels(bool paused) {
-  setTouchNavLabels(nullptr, nullptr, "Exit", nullptr, paused ? "Resume" : "Pause");
+static const char* bleSnifferRangeLabel(int minRssi) {
+  switch (minRssi) {
+    case 0: return "R:ALL";
+    case -75: return "R:-75";
+    case -70: return "R:-70";
+    case -60: return "R:-60";
+    case -55: return "R:-55";
+    case -50: return "R:-50";
+    default: return "R:-65";
+  }
+}
+
+static void bleSetSnifferNavLabels(bool paused, int minRssi) {
+  setTouchNavLabels(bleSnifferRangeLabel(minRssi), nullptr, "Exit", nullptr,
+                    paused ? "Resume" : "Pause");
 }
 
 static void bleSetJammerNavLabels() {
@@ -8916,7 +8929,6 @@ struct Config {
   static constexpr int maxMfgDataLength = 31;
   static constexpr unsigned long deviceTimeout = 30000;
   static constexpr int maxRandomizedMacChanges = 5;
-  static constexpr int minNewBleRssi = -65;
 };
 
 enum class MessageType {
@@ -8962,6 +8974,7 @@ private:
   bool scanning = true;
   bool paused = false;
   bool isBLEScanActive = true;
+  int minNewBleRssi = -65;
   unsigned long pauseStartedAt = 0;
   unsigned long lastScanTime = 0;
   unsigned long lastFlashToggle = 0;
@@ -9235,6 +9248,22 @@ private:
     refreshDisplay();
   }
 
+  void cycleRssiThreshold() {
+    switch (minNewBleRssi) {
+      case 0:   minNewBleRssi = -75; break;
+      case -75: minNewBleRssi = -70; break;
+      case -70: minNewBleRssi = -65; break;
+      case -65: minNewBleRssi = -60; break;
+      case -60: minNewBleRssi = -55; break;
+      case -55: minNewBleRssi = -50; break;
+      default:  minNewBleRssi = 0; break;
+    }
+    String value = minNewBleRssi == 0 ? "All" : String(minNewBleRssi) + " dBm";
+    addLine("RSSI: " + value, DARK_GRAY, false, MessageType::STATUS);
+    bleSetSnifferNavLabels(paused, minNewBleRssi);
+    redrawTouchButtonBar();
+  }
+
   void refreshDisplay() {
     for (int i = 0; i < MAX_LINES; i++) {
       displayLines[i].text = "";
@@ -9382,6 +9411,7 @@ public:
     pBLEScan->setActiveScan(true);
     scanning = true;
     paused = false;
+    bleSetSnifferNavLabels(paused, minNewBleRssi);
 
     addLine("Bluetooth Sniffer Ready", DARK_GRAY, true, MessageType::STATUS);
     startBLEScan();
@@ -9401,6 +9431,9 @@ public:
     }
     if (paused) {
       return;
+    }
+    if (isButtonPressedEdge(BTN_LEFT)) {
+      cycleRssiThreshold();
     }
 
     runUI();
@@ -9470,7 +9503,7 @@ public:
         sniffer.devices[idx].packetCount++;
         sniffer.devices[idx].lastSeen = timestamp;
         sniffer.checkSuspiciousActivity(idx, timestamp);
-      } else if (rssi >= Config::minNewBleRssi) {
+      } else if (sniffer.minNewBleRssi == 0 || rssi >= sniffer.minNewBleRssi) {
         sniffer.processNewDevice(advertisedDevice, nullptr, timestamp, true);
       }
     }
@@ -9539,7 +9572,7 @@ public:
       if (pBLEScan) {
         pBLEScan->stop();
       }
-      bleSetSnifferNavLabels(true);
+      bleSetSnifferNavLabels(true, minNewBleRssi);
       redrawTouchButtonBar();
       updateHeader();
       return;
@@ -9550,7 +9583,7 @@ public:
       devices[i].lastSeen += pauseDuration;
     }
     paused = false;
-    bleSetSnifferNavLabels(false);
+    bleSetSnifferNavLabels(false, minNewBleRssi);
     redrawTouchButtonBar();
     isBLEScanActive = true;
     startBLEScan();
@@ -9571,7 +9604,7 @@ BluetoothSniffer sniffer;
 void blesnifferSetup() {
   pauseBackgroundRadioTasks();
   setTouchButtonInputEnabled(true);
-  bleSetSnifferNavLabels(false);
+  bleSetSnifferNavLabels(false, -65);
   bleClearBody(TFT_BLACK);
   {
     float currentBatteryVoltage = readBatteryVoltage();

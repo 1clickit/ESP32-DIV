@@ -1,6 +1,10 @@
+#include "SettingsStore.h"
+#if BOARD_HAS_ESP32S3
 #include <ArduinoJson.h>
 #include <SD.h>
-#include "SettingsStore.h"
+#else
+#include <Preferences.h>
+#endif
 #include "utils.h"
 
 
@@ -41,6 +45,8 @@ void settingsApplyBoardTouchDefaults() {
   s.touchYMin = TOUCH_Y_MIN;
   s.touchYMax = TOUCH_Y_MAX;
 }
+
+#if BOARD_HAS_ESP32S3
 
 static bool settingsTouchSavedForBoard(const StaticJsonDocument<512>& doc) {
   JsonObjectConst touch = doc["touch"];
@@ -162,3 +168,92 @@ bool settingsSave() {
   f.close();
   return ok;
 }
+
+#else
+
+static constexpr char kSettingsNamespace[] = "settings";
+static constexpr uint8_t kSettingsSchemaVersion = 1;
+
+static bool settingsTouchAxisValid(uint16_t first, uint16_t second) {
+  return first <= 4095 && second <= 4095 && first != second;
+}
+
+bool settingsLoad() {
+  g_settings = AppSettings{};
+  settingsApplyBoardTouchDefaults();
+
+  Preferences prefs;
+  if (!prefs.begin(kSettingsNamespace, true)) {
+    return true;
+  }
+
+  if (prefs.getUChar("ver", 0) != kSettingsSchemaVersion) {
+    prefs.end();
+    return true;
+  }
+
+  auto& s = g_settings;
+  s.brightness = prefs.getUChar("bright", s.brightness);
+
+  uint8_t savedTheme = prefs.getUChar("theme", (uint8_t)s.theme);
+  if (savedTheme <= (uint8_t)Theme::Light) {
+    s.theme = (Theme)savedTheme;
+  }
+
+  s.accentColor = accentPresetClamp(prefs.getUChar("accent", s.accentColor));
+  s.neopixelEnabled = prefs.getBool("neo", s.neopixelEnabled);
+  s.autoWifiScan = prefs.getBool("wifi", s.autoWifiScan);
+  s.autoBleScan = prefs.getBool("ble", s.autoBleScan);
+
+  if (s.autoWifiScan != s.autoBleScan) {
+    bool enabled = s.autoWifiScan || s.autoBleScan;
+    s.autoWifiScan = enabled;
+    s.autoBleScan = enabled;
+  }
+
+  String savedBoard = prefs.getString("board", "");
+  if (savedBoard == TOUCH_PROFILE_ID) {
+    uint16_t xMin = prefs.getUShort("txmin", TOUCH_X_MIN);
+    uint16_t xMax = prefs.getUShort("txmax", TOUCH_X_MAX);
+    uint16_t yMin = prefs.getUShort("tymin", TOUCH_Y_MIN);
+    uint16_t yMax = prefs.getUShort("tymax", TOUCH_Y_MAX);
+    if (settingsTouchAxisValid(xMin, xMax) && settingsTouchAxisValid(yMin, yMax)) {
+      s.touchXMin = xMin;
+      s.touchXMax = xMax;
+      s.touchYMin = yMin;
+      s.touchYMax = yMax;
+    }
+  }
+
+  prefs.end();
+  return true;
+}
+
+bool settingsSave() {
+  Preferences prefs;
+  if (!prefs.begin(kSettingsNamespace, false)) {
+    return false;
+  }
+
+  auto& s = g_settings;
+  bool ok = prefs.putUChar("ver", 0) == sizeof(uint8_t);
+  ok = ok && prefs.putString("board", TOUCH_PROFILE_ID) > 0;
+  ok = ok && prefs.putUChar("bright", s.brightness) == sizeof(uint8_t);
+  ok = ok && prefs.putUChar("theme", (uint8_t)s.theme) == sizeof(uint8_t);
+  ok = ok && prefs.putUChar("accent", accentPresetClamp(s.accentColor)) == sizeof(uint8_t);
+  ok = ok && prefs.putBool("neo", s.neopixelEnabled) == sizeof(uint8_t);
+  ok = ok && prefs.putBool("wifi", s.autoWifiScan) == sizeof(uint8_t);
+  ok = ok && prefs.putBool("ble", s.autoBleScan) == sizeof(uint8_t);
+  ok = ok && prefs.putUShort("txmin", s.touchXMin) == sizeof(uint16_t);
+  ok = ok && prefs.putUShort("txmax", s.touchXMax) == sizeof(uint16_t);
+  ok = ok && prefs.putUShort("tymin", s.touchYMin) == sizeof(uint16_t);
+  ok = ok && prefs.putUShort("tymax", s.touchYMax) == sizeof(uint16_t);
+  if (ok) {
+    ok = prefs.putUChar("ver", kSettingsSchemaVersion) == sizeof(uint8_t);
+  }
+
+  prefs.end();
+  return ok;
+}
+
+#endif

@@ -4532,13 +4532,8 @@ void setup() {
 
   initSDCard();
 
-#if BOARD_HAS_ESP32S3
+  // ESP32-S3 loads SD JSON; classic ESP32 loads NVS without touching SD.
   settingsLoad();
-#else
-  // Avoid SD mount via settingsLoad on v1 (same crash as step 3).
-  settingsApplyBoardTouchDefaults();
-  Serial.println("[boot] settings defaults (v1, SD deferred)");
-#endif
   applyThemeToPalette(settings().theme);
   setBrightness(settings().brightness);
 

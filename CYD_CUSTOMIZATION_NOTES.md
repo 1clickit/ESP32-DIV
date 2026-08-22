@@ -43,11 +43,23 @@ The Sniffer updates quickly enough to make MAC addresses, RSSI values, names, an
 
 Resume shifts each device's `lastSeen` timestamp by the pause duration before restarting scanning. A pause longer than the 30-second timeout therefore does not immediately purge the preserved table.
 
-## Nearby-device RSSI admission
+## Nearby-device RSSI admission and Range control
 
-Physical testing observed advertisements around `-97 dBm`, well outside the owner's desired immediate surroundings. New BLE devices are therefore admitted only when first observed at `-65 dBm` or stronger. Weaker unknown devices are rejected before consuming a table slot or affecting new-device/flood accounting. Once admitted, a device continues to be tracked through later RSSI fading and retains normal timeout behavior.
+Physical testing observed advertisements around `-97 dBm`, well outside the owner's desired immediate surroundings. A fixed `-65 dBm` new-device admission threshold was first added, then made selectable from the Sniffer's lower-left Range control. Available choices are `ALL`, `-75`, `-70`, `-65`, `-60`, `-55`, and `-50 dBm`; startup defaults to `-65 dBm`, and the current value remains visible as a compact label such as `R:-65`.
+
+Weaker unknown devices are rejected before consuming a table slot or affecting new-device/flood accounting. Once admitted, a device continues to be tracked through later RSSI fading or Range changes and retains normal timeout behavior. The Range selection is not currently persisted across reboot.
 
 This is an **RF admission/display preference**, not a security or jamming judgment.
+
+## CYD Settings persistence
+
+The stock author's CYD firmware reproduced a Settings Save lockup both with and without an SD card. Brightness changed correctly at runtime, but saving either failed or displayed `Saved` and then left the touch-driven UI unusable.
+
+The CYD TFT uses HSPI, while its XPT2046 touch controller and the Arduino global SD `SPI` object both use the classic ESP32's VSPI host with different pin mappings. Runtime SD mounting remapped VSPI from the touch pins to the SD pins. Subsequent touch access did not restore the original mapping; because the CYD has no PCF8574 buttons, losing touch appeared to freeze the entire device. The classic boot path had already avoided SD-backed `settingsLoad()` because SD mounting was known to cause crashes or watchdog resets.
+
+Classic ESP32/CYD Settings Load and Save now use Arduino Preferences with a versioned schema in the existing 20 KB NVS partition. Brightness, theme, accent, NeoPixel state, automatic scan preferences, and board-validated touch calibration are persisted without accessing SD. No partition change or SD-to-NVS migration was added. ESP32-S3 builds retain the author's existing `/config/settings.json` SD backend. The CYD build became approximately 3 KB smaller after selecting the NVS backend at compile time.
+
+The owner physically confirmed the corrected CYD Settings behavior sufficiently for publication with and without an SD card.
 
 ## Remaining BLE investigations
 
@@ -64,3 +76,7 @@ The current detector reports `Jamming Suspected` when either cumulative `packetC
 The source has a `startBTScan()` state/display path, but inspection found that it does not initiate ESP-IDF Classic Bluetooth discovery. BLE initialization also releases Classic controller memory. Referencing a Classic-BT cancellation API during Pause development linked the otherwise-unused Classic stack and grew the application to approximately 121% of its partition, so that call was removed.
 
 Physical display testing nevertheless appeared to show entries identified as `BT`, including around `-97 dBm`. The discrepancy remains unresolved; additional Classic-BT APIs are intentionally not enabled.
+
+## Validation scope
+
+The CYD flash-size correction, display operation, BLE randomized-MAC fix, Sniffer Pause/Resume, RSSI admission and Range controls, and NVS-backed Settings behavior received focused physical validation. Side effects to unrelated ESP32-DIV features have **not** been exhaustively regression-tested; Wi-Fi, other Bluetooth tools, SD-dependent features, external radios, RFID, IR, GPS, and all cross-feature transitions should not be assumed fully covered by this validation.

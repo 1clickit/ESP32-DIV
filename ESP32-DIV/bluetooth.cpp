@@ -8916,6 +8916,7 @@ struct Config {
   static constexpr int maxMfgDataLength = 31;
   static constexpr unsigned long deviceTimeout = 30000;
   static constexpr int maxRandomizedMacChanges = 5;
+  static constexpr int minNewBleRssi = -65;
 };
 
 enum class MessageType {
@@ -9469,7 +9470,7 @@ public:
         sniffer.devices[idx].packetCount++;
         sniffer.devices[idx].lastSeen = timestamp;
         sniffer.checkSuspiciousActivity(idx, timestamp);
-      } else {
+      } else if (rssi >= Config::minNewBleRssi) {
         sniffer.processNewDevice(advertisedDevice, nullptr, timestamp, true);
       }
     }
